@@ -36,9 +36,9 @@
 - 新增能力须补对应测试段;缺口清单见 ROADMAP
 
 ## 验证基线(STATUS.md 只留指针)
-- 已跑通:`npm run build`(tsc + vite,1s 量级,脚手架默认页)、`npm install`(npmmirror,73 包)
-- 待跑通:`cargo check`(等 VS Build Tools 安装完成后)
+- 已跑通:`npm run build`(tsc + vite,脚手架默认页)、`npm install`(npmmirror)、`cargo check`(Rust 1.97.1 + MSVC 14.44 + WinSDK 10.0.26100,首次 2m17s)
+- MSVC 绕行(installer 未写完注册表时):`src-tauri/.cargo/config.toml` 显式 linker + 手动 `LIB=SDK um/x64;ucrt/x64;MSVC lib/x64`;注册表就绪后应删除配置回归自动探测
 - 验收方式:ACCEPTANCE.md 待实测清单(GUI 人工项);自动断言测试段(后续迭代建立)
-- 打包/发布:打包命令 `npm run tauri build`;已知限制:Windows 需 MSVC
+- 打包/发布:打包命令 `npm run tauri build`;已知限制:Windows 需 MSVC,构建前需加载 MSVC 环境
 - 构建/打包/工具链类改动必须实际构建并重跑本基线
 - 人工验收要点:docs/ACCEPTANCE.md 待实测清单
