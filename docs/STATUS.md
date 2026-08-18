@@ -4,12 +4,11 @@
 
 ## 记录(倒序,最新在上 = 当前状态)
 
-- 2026-08-18:**M0 骨架完成**(1c36b5d;engine 模块+4 IPC 命令+前端目录选择;验证:cargo test 4/4、npm run build 通过;待人工实测 ACCEPTANCE 4 项)
+- 2026-08-18:**M0 骨架完成**(1c36b5d;engine 模块+4 IPC 命令+前端目录选择;验证:cargo test 4/4、npm run build 通过;人工实测 4/4 通过)
 
 ## 验证基线
 - 已跑通命令/验收方式/打包发布见 `DEV-GUIDE.md`「验证基线」节,此处只留指针
 
 ## 打开事项
-- [ ] M0 人工实测:ACCEPTANCE.md 待实测清单 4 项(启动/IPC/目录选择/SQLite 持久化)
 - [ ] 推送:等用户提示后 git push(remote 已设)
 - [ ] M1 扫描浏览(迭代 2):增量扫描器 + 元数据/EXIF + 缩略图队列 + 网格浏览(规划见 ROADMAP)
