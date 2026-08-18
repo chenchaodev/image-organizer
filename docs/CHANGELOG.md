@@ -2,6 +2,11 @@
 
 > 变更历史:随发版更新——平时提交不写本文件(流水查 git log),「迭代完成」打版本号时从 git log 汇总本版本条目(见全局配置目录 AGENTS.md「提交时」节)。版本号三统一细则见全局配置目录 `PUBLISH-GUIDE.md`(单一事实源);条目号与 tag 同号,如 tag v1.0.0 → [1.0.0];历史遗留「迭代序列与发布号解耦」为例外,须显式声明对应关系。写入的命令/事实须实际验证过。
 
+## [0.1.4] - 2026-08-18
+- 测试发布:验证 sccache 编译缓存 + bundle 精简提速(对比 v0.1.3:macOS 4m17s/Ubuntu 8m45s/Windows 最慢)
+- 验证:前端 build、cargo check/test;发布构建由 CI release job 验证
+- 待实测:发布资产三平台可运行
+
 ## [0.1.3] - 2026-08-18
 - 测试发布:验证 release 构建缓存提速(rust-cache 覆盖 target/release,对比 v0.1.2 冷缓存耗时)
 - 验证:前端 build、cargo check/test;发布构建由 CI release job 验证
