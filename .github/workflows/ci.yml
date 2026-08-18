@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+
+jobs:
+  check:
+    name: Build & Test
+    if: github.ref_type == 'branch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      # GitHub runner 为海外环境,覆盖项目 .npmrc 的 npmmirror,走官方源更快更稳
+      - name: Use official npm registry
+        run: npm config set registry https://registry.npmjs.org
+      - name: Install frontend deps
+        run: npm ci
+      - name: Frontend build (tsc + vite)
+        run: npm run build
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Cargo check
+        run: cargo check
+        working-directory: src-tauri
+      - name: Cargo test
+        run: cargo test
+        working-directory: src-tauri
+
+  release:
+    name: Release (${{ matrix.platform }})
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest, macos-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 需要全历史:releaseBody 用 git log 汇总上次 tag 到本次的提交
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Use official npm registry
+        run: npm config set registry https://registry.npmjs.org
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install frontend deps
+        run: npm ci
+      # 汇总上次 tag 到本次 tag 的提交(prefix 风格,与仓库一致);无上次 tag 时为首发
+      - name: Generate release body
+        id: release_body
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || true)
+          if [ -z "$PREV_TAG" ]; then
+            BODY="首次发布"
+          else
+            BODY=$(git log --oneline --no-merges "$PREV_TAG..HEAD" | sed 's/^/- /')
+          fi
+          echo "body<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$BODY" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+      # 版本号三统一:tag vX.Y.Z 与 package.json/tauri.conf.json 版本一致
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Image Organizer ${{ github.ref_name }}"
+          releaseBody: ${{ steps.release_body.outputs.body }}
+          releaseDraft: false
+          prerelease: false
