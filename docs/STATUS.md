@@ -4,12 +4,11 @@
 
 ## 记录(倒序,最新在上 = 当前状态)
 
-- 2026-08-18:**初始化工程完成**(51b1755;脚手架+docs 体系+镜像配置;验证:前端 build 通过、cargo check 通过;待办:推送等用户提示、installer 注册表就绪后移除 src-tauri/.cargo/config.toml 临时配置)
+- 2026-08-18:**初始化工程完成**(51b1755;脚手架+docs 体系+镜像配置;验证:前端 build 通过、cargo check 通过(MSVC 注册表就绪,临时配置已移除);待办:推送等用户提示)
 
 ## 验证基线
 - 已跑通命令/验收方式/打包发布见 `DEV-GUIDE.md`「验证基线」节,此处只留指针
 
 ## 打开事项
 - [ ] 推送:等用户提示后 git push(remote 已设)
-- [ ] VS installer 注册表确认后删除 `src-tauri/.cargo/config.toml` 临时 linker 配置并验证 cargo check
 - [ ] M0 骨架开发(迭代 1):图库目录选择界面 + SQLite 初始化 + IPC 示例(规划见 ROADMAP)
