@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "image-organizer",
+        "title": "Image Organizer",
         "width": 800,
         "height": 600
       }

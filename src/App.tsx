@@ -1,49 +1,55 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+interface AppInfo {
+  name: string;
+  version: string;
+}
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
+function App() {
+  const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
+  const [libraryPath, setLibraryPath] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // 启动时拉取应用信息与上次图库路径：前者证明 IPC 链路通（M0 验收点），
+  // 后者让重开应用后能恢复显示已选目录（settings 持久化回显）。
+  useEffect(() => {
+    invoke<AppInfo>("get_app_info")
+      .then(setAppInfo)
+      .catch((e) => setError(String(e)));
+    invoke<string | null>("get_library")
+      .then(setLibraryPath)
+      .catch((e) => setError(String(e)));
+  }, []);
+
+  // 选目录 → 立即持久化 → 回显。选路径后的 set 失败会留在 error 区可见。
+  async function chooseLibrary() {
+    setError(null);
+    try {
+      const dir = await open({ directory: true, multiple: false });
+      if (dir) {
+        setLibraryPath(await invoke<string>("set_library", { path: dir }));
+      }
+    } catch (e) {
+      setError(String(e));
+    }
   }
 
   return (
     <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
+      <h1>Image Organizer</h1>
+      {appInfo && <p className="app-version">版本 {appInfo.version}</p>}
+      <button type="button" onClick={chooseLibrary}>
+        选择图库目录
+      </button>
+      {libraryPath ? (
+        <p className="library-path">图库目录：{libraryPath}</p>
+      ) : (
+        <p className="hint">尚未设置图库目录</p>
+      )}
+      {error && <p className="error">{error}</p>}
     </main>
   );
 }
