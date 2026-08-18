@@ -5,6 +5,11 @@ on:
     branches: [master]
     tags: ["v*"]
 
+# 同一 ref 连续 push 时取消旧运行,只保留最新(避免重复构建浪费)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     name: Build & Test
