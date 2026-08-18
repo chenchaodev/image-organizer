@@ -41,8 +41,8 @@ jobs:
 
   release:
     name: Release (${{ matrix.platform }})
+    # 不依赖 check:tag push 时 check 因 if(branch 限定)被 skip,needs 会连带跳过本 job
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: check
     strategy:
       fail-fast: false
       matrix:
