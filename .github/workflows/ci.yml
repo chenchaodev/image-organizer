@@ -29,6 +29,8 @@ jobs:
       - name: Frontend build (tsc + vite)
         run: npm run build
       - uses: dtolnay/rust-toolchain@stable
+      # sccache:跨运行共享编译单元缓存,Windows 慢平台收益最大
+      - uses: mozilla/sccache-action@v0.0.7
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
@@ -45,8 +47,15 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     strategy:
       fail-fast: false
+      # 按平台精简 bundle:Windows 只出 NSIS、macOS 只出 dmg、Linux 出 deb+AppImage
       matrix:
-        platform: [windows-latest, macos-latest, ubuntu-22.04]
+        include:
+          - platform: windows-latest
+            bundles: nsis
+          - platform: macos-latest
+            bundles: dmg
+          - platform: ubuntu-22.04
+            bundles: deb,appimage
     runs-on: ${{ matrix.platform }}
     permissions:
       contents: write
@@ -67,6 +76,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - uses: dtolnay/rust-toolchain@stable
+      # sccache:跨运行共享编译单元缓存,Windows 慢平台收益最大
+      - uses: mozilla/sccache-action@v0.0.7
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
@@ -97,3 +108,4 @@ jobs:
           releaseBody: ${{ steps.release_body.outputs.body }}
           releaseDraft: false
           prerelease: false
+          args: --bundles ${{ matrix.bundles }}
