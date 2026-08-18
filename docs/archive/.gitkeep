@@ -1,0 +1,3 @@
+# 调研存档目录(archive/)
+
+子代理调研/评审结论原文存档位置(全局 AGENTS.md「子代理结论落盘」节):`YYYY-MM-DD-HHmmss-主题.md`(HHmmss=24 小时时分秒)。仅供开发者自查,不加入 README 索引/跟踪。
