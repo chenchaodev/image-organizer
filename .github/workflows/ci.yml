@@ -16,10 +16,10 @@ jobs:
     if: github.ref_type == 'branch'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       # GitHub runner 为海外环境,覆盖项目 .npmrc 的 npmmirror,走官方源更快更稳
       - name: Use official npm registry
@@ -51,13 +51,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # 需要全历史:releaseBody 用 git log 汇总上次 tag 到本次的提交
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - name: Use official npm registry
         run: npm config set registry https://registry.npmjs.org
