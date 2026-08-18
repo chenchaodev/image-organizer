@@ -1,5 +1,0 @@
-# 临时:VS Build Tools 安装器尚未写完注册表,rustc 探测不到 MSVC 实例。
-# 安装完成后可删除本文件(注册表探测自动生效)。
-# 注意:显式 linker 时需先加载 vcvars64.bat 环境(INCLUDE/LIB)。
-[target.x86_64-pc-windows-msvc]
-linker = "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\link.exe"
