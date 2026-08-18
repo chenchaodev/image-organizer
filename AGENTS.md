@@ -11,6 +11,7 @@
 
 ## 规则
 - 提交策略:一次提交 = 一个可独立回退的逻辑单元;message 用 prefix 风格(feat/fix/docs/chore/refactor)
+- 推送:仅用户明确指示时执行(当场指令,一次授权只覆盖当次推送);提交后不擅自 push,细则见全局配置目录 WORKFLOW-GUIDE.md 阶段 8
 - 提交前:过 `npm run build`(tsc + vite)与 `cargo check`;git status 只含本逻辑单元文件
 - 版本号三统一:package.json(版本源)/git tag/CHANGELOG 同号同源,细则见全局配置目录 PUBLISH-GUIDE.md
 - 测试体系:test/ 按内容主题零注册分层;新增能力须补对应测试段(细则见 docs/DEV-GUIDE.md)
