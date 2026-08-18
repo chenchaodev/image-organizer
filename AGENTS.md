@@ -14,4 +14,4 @@
 - 提交前:过 `npm run build`(tsc + vite)与 `cargo check`;git status 只含本逻辑单元文件
 - 版本号三统一:package.json(版本源)/git tag/CHANGELOG 同号同源,细则见全局配置目录 PUBLISH-GUIDE.md
 - 测试体系:test/ 按内容主题零注册分层;新增能力须补对应测试段(细则见 docs/DEV-GUIDE.md)
-- 本仓库特有规则:Rust 工具链未加系统 PATH,用 `%USERPROFILE%\.cargo\bin\` 全路径调用或临时加 PATH;pwsh 环境;图片库路径含中文/空格时注意引号
+- 本仓库特有规则:Rust 工具链已加入用户 PATH(`%USERPROFILE%\.cargo\bin`,2026-08-18 起);pwsh 环境;图片库路径含中文/空格时注意引号

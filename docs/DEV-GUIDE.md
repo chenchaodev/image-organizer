@@ -4,7 +4,7 @@
 
 ## 环境
 - Node.js 24 + npm 11(镜像:npm 走项目 .npmrc npmmirror)
-- Rust 1.97.1(rustup 管理;工具链未加入系统 PATH,用 `%USERPROFILE%\.cargo\bin\` 全路径或临时加 PATH;镜像:cargo 中科大 sparse、rustup 华科,详见 AGENTS.md)
+- Rust 1.97.1(rustup 管理;已加入用户 PATH `%USERPROFILE%\.cargo\bin`;镜像:cargo 中科大 sparse、rustup 华科,详见 AGENTS.md)
 - Windows:MSVC Build Tools(VS 2022,VC Tools 工作负载)编译 Rust 必需
 
 ## 命令
