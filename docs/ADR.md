@@ -14,6 +14,14 @@
 
 ## 条目
 
+### 2026-08-19 19:43:20 HEIC 解码方案(ADR-03)
+- 决策:HEIC/HEIF 解码采用 libheif-rs 2.7.0 + libheif-sys 5.3.0;Windows 构建依赖 vcpkg 预装 libheif(CI 用 actions/cache 缓存 vcpkg 目录);优先解码 HEIF 内嵌缩略图,无内嵌才全尺寸解码
+- 理由:用户确认 M1 需支持 HEIC;libheif-rs 是 Rust 生态唯一成熟方案(活跃维护);内嵌缩略图解码毫秒级,避免 100-300ms 全解码×10万张的性能与内存压力(12MP 全解码 ~48MB/张)
+- 备选: heif crate(停更多年);image crate(无 HEIC 支持);@napi-rs/image(Linux 不支持);外部进程 exiftool/ffmpeg(每张进程开销大,10万张不可行)
+- 验证: 待 M1 开发 Windows vcpkg 构建 + 三平台 CI 验证
+- 来源: 子代理(librarian)
+- 关联: docs/archive/20260819-194320-HEIC与虚拟滚动调研.md
+
 ### 2026-08-18 21:45:00 技术栈选型(ADR-01)
 - 决策:跨平台桌面应用采用 Tauri 2(Rust 1.97 后端 + React 19/TypeScript/Vite 7 前端),SQLite 存储;图片处理 image/img_hash/exif,数据库 rusqlite
 - 理由:1万~10万张图片的扫描/哈希/缩略图/转换为 CPU+IO 密集任务,Rust 性能与并发优势明显;Tauri 2 体积小(~10MB)、内存占用低,跨 Win/Mac/Linux 一套代码;React 19 + TanStack Virtual 提供成熟虚拟滚动方案;SQLite 单文件 + WAL 满足本地索引与 FTS5 全文搜索需求

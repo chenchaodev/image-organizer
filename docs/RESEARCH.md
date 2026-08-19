@@ -13,6 +13,13 @@
 
 ## 条目
 
+### 2026-08-19 19:43:20 HEIC 解码与虚拟滚动选型
+- 结论:HEIC 用 libheif-rs 2.7.0 + libheif-sys 5.3.0(内嵌 libheif 1.23.0);Windows 必须 vcpkg 预装 libheif(不能纯 cargo 构建),`vcpkg install libheif[core,libde265]` 规避 GPL;macOS `brew install libheif`、Ubuntu `apt install libheif-dev`;HEIF 内嵌缩略图可直接解码(毫秒级);虚拟滚动用 @tanstack/react-virtual 3.14.9(React 19 官方适配);缩略图缓存 WebP q80,image thumbnail() 快速但锯齿,质量优先 resize(Triangle);并发 rayon + spawn_blocking,libheif 内部默认 4 线程注意超订
+- 理由:libheif-rs 是 Rust 生态唯一成熟 HEIC 方案;image crate 无 HEIC(专利+项目政策);react-window 维护停滞、react-virtuoso 网格限等尺寸
+- 验证: 待 M1 开发实际构建验证(Windows vcpkg 路径)
+- 来源: 子代理(librarian)
+- 关联: docs/archive/20260819-194320-HEIC与虚拟滚动调研.md
+
 ### 2026-08-18 21:46:00 国内安装 Rust 工具链镜像(实测)
 - 结论:rustup-init.exe 走华科镜像 `https://mirrors.hust.edu.cn/rustup/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe` 可直下(8.6MB,PE 文件);安装时设 `RUSTUP_DIST_SERVER=https://mirrors.hust.edu.cn/rustup`、`RUSTUP_UPDATE_ROOT=https://mirrors.hust.edu.cn/rustup/rustup`
 - 理由:中科大 `mirrors.ustc.edu.cn/rust-static` 对 exe 返回「Verifying your browser」JS 验证页(Invoke-WebRequest 拿不到真文件);rsproxy.cn/rustup-init.exe 404;阿里云镜像站未提供 rustup-init.exe 直链
