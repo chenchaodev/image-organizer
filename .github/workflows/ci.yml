@@ -81,7 +81,11 @@ jobs:
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |
-          sudo apt-get update
+          # GitHub apt-mirrors.txt 镜像机制偶发卡死(2026-08 实测 apt update 卡 6h 超时),
+          # 跳过该机制 + 固定官方源 + 重试/超时参数,防止再次卡死
+          sudo rm -f /etc/apt/apt-mirrors.txt
+          sudo sed -i 's|https\?://azure.archive.ubuntu.com/ubuntu/|http://archive.ubuntu.com/ubuntu/|g' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+          sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - uses: dtolnay/rust-toolchain@stable
       # sccache:跨运行共享编译单元缓存,Windows 慢平台收益最大
