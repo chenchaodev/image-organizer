@@ -4,6 +4,7 @@
 
 ## 记录(倒序,最新在上 = 当前状态)
 
+- 2026-08-19:**M1 实测修复三轮**——dev 构建依赖开优化(解码提速 ~40 倍)+ 缩略图解码限流 4 并发(防内存暴涨/详情饿死)+ vcpkg triplet 固化到 .cargo/config.toml;cargo test 20 过,待复测
 - 2026-08-19:**M1 实测修复二轮**——HEIC 详情改用缩略图(WebView 不支持 HEIC)、扫描器 missing→ok 恢复(重扫列表空)、缩略图解码移出锁(大库串行卡顿);cargo test 20 过,待复测
 - 2026-08-19:**M1 实测修复一轮**——启用 asset protocol(convertFileSrc 必需)+ get_image_detail 改异步(EXIF 读取不再阻塞主线程);cargo check/test 通过,待复测
 - 2026-08-19:**迭代 2「M1 扫描浏览」开发完成**——缩略图生成/缓存(WebP 无损)+HEIC 解码(libheif-rs+vcpkg)+前端网格浏览/详情面板/扫描进度+vitest 测试段;Rust 19 测试+前端 13 测试通过,待人工实测(ACCEPTANCE 5 项)
