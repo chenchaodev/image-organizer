@@ -242,16 +242,24 @@ fn get_images(
 }
 
 /// 查询单张图片详情（索引行 + EXIF 键值）。
+///
+/// 为什么 spawn_blocking：EXIF 读取是文件 I/O（大图可能数十到数百毫秒），
+/// 同步命令在主线程执行会阻塞 UI（实测点击详情卡死）；与 get_thumbnail_path 同理。
 #[tauri::command]
-fn get_image_detail(
+async fn get_image_detail(
     state: tauri::State<'_, DbState>,
     id: i64,
 ) -> Result<ImageDetail, String> {
-    let guard = state.conn.lock().map_err(|_| "内部状态锁定失败".to_string())?;
-    let conn = guard
-        .as_ref()
-        .ok_or_else(|| "数据库未初始化".to_string())?;
-    let (row, exif) = images::get_image_detail(conn, id)?;
+    let conn = state.conn.clone();
+    let (row, exif) = tauri::async_runtime::spawn_blocking(move || {
+        let guard = conn.lock().map_err(|_| "内部状态锁定失败".to_string())?;
+        let conn = guard
+            .as_ref()
+            .ok_or_else(|| "数据库未初始化".to_string())?;
+        images::get_image_detail(conn, id)
+    })
+    .await
+    .map_err(|e| format!("详情查询线程异常：{e}"))??;
     Ok(ImageDetail {
         id: row.id,
         path: row.path,

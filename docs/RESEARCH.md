@@ -13,6 +13,13 @@
 
 ## 条目
 
+### 2026-08-19 21:10:00 Tauri 2 convertFileSrc 需启用 asset protocol(实测)
+- 结论:前端用 convertFileSrc(path) 显示本地文件(缩略图/原图)时,tauri.conf.json 必须配置 `security.assetProtocol.enable=true` 且 scope 覆盖目标路径(本地桌面应用可先 `["**"]`),同时 Cargo.toml 的 tauri 依赖需加 `protocol-asset` feature;缺任一则 img 加载失败(现象:网格有格子无图)。另:同步命令在主线程执行文件 I/O(EXIF 读取)会阻塞 UI(现象:点击详情卡死),应改 async + spawn_blocking
+- 理由:asset protocol 默认关闭,convertFileSrc 生成的 asset:// URL 无法加载;tauri-build 会校验 feature 与配置一致性(报错提示 add the protocol-asset feature)
+- 验证: 2026-08-19 实测——未配置时缩略图已生成(文件在 app data)但界面无图;配置 enable+scope 并加 feature 后 cargo check/test 通过,待 GUI 复测
+- 来源: 主会话
+- 关联: src-tauri/tauri.conf.json、src-tauri/Cargo.toml、src-tauri/src/lib.rs
+
 ### 2026-08-19 19:43:20 HEIC 解码与虚拟滚动选型
 - 结论:HEIC 用 libheif-rs 2.7.0 + libheif-sys 5.3.0(内嵌 libheif 1.23.0);Windows 必须 vcpkg 预装 libheif(不能纯 cargo 构建),`vcpkg install libheif[core,libde265]` 规避 GPL;macOS `brew install libheif`、Ubuntu `apt install libheif-dev`;HEIF 内嵌缩略图可直接解码(毫秒级);虚拟滚动用 @tanstack/react-virtual 3.14.9(React 19 官方适配);缩略图缓存 WebP q80,image thumbnail() 快速但锯齿,质量优先 resize(Triangle);并发 rayon + spawn_blocking,libheif 内部默认 4 线程注意超订
 - 理由:libheif-rs 是 Rust 生态唯一成熟 HEIC 方案;image crate 无 HEIC(专利+项目政策);react-window 维护停滞、react-virtuoso 网格限等尺寸
