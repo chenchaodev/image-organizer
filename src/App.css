@@ -322,6 +322,12 @@ button:disabled {
   display: block;
 }
 
+/* HEIC 详情缩略图加载中/失败占位（复用容器底色） */
+.detail-image-placeholder {
+  width: 100%;
+  min-height: 200px;
+}
+
 .detail-meta,
 .exif-group dl {
   margin: 0;

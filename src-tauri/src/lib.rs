@@ -278,6 +278,9 @@ async fn get_image_detail(
 /// 直接执行会阻塞 Tauri 异步运行时的事件循环（ADR-03）。
 /// 为什么 cache_dir 在命令层解析：引擎层不感知 Tauri 路径 API（硬约束），
 /// 应用数据目录经 app.path() 获取后拼 thumbnails 子目录。
+/// 为什么锁只覆盖查询/写入：解码是 CPU 密集，若持锁执行，多个并发请求
+/// 会串行排队（实测大库缩略图长时间不显示、详情查询排队卡死）；
+/// 拆出后解码在 blocking 池并行，锁只覆盖毫秒级 DB 操作。
 #[tauri::command]
 async fn get_thumbnail_path(
     state: tauri::State<'_, DbState>,
@@ -294,12 +297,35 @@ async fn get_thumbnail_path(
     // 为什么克隆 Arc 而非直接引用 state：spawn_blocking 要求闭包 'static，
     // 不能借用命令作用域内的 state；连接在闭包内重新 lock 获取。
     let conn = state.conn.clone();
-    let path = tauri::async_runtime::spawn_blocking(move || {
-        let guard = conn.lock().map_err(|_| "内部状态锁定失败".to_string())?;
-        let conn = guard
-            .as_ref()
-            .ok_or_else(|| "数据库未初始化".to_string())?;
-        thumbnail::get_or_create_thumbnail(conn, &cache_dir, id)
+    let path = tauri::async_runtime::spawn_blocking(
+        move || -> Result<Option<PathBuf>, String> {
+            // 短暂持锁：查源路径与缓存命中
+            let (source, cached) = {
+            let guard = conn.lock().map_err(|_| "内部状态锁定失败".to_string())?;
+            let conn = guard
+                .as_ref()
+                .ok_or_else(|| "数据库未初始化".to_string())?;
+            thumbnail::thumbnail_lookup(conn, id)?
+        };
+        if let Some(p) = cached {
+            return Ok(Some(p));
+        }
+        let Some(source) = source else {
+            return Ok(None);
+        };
+        // 不持锁：解码生成（blocking 池并行）
+        let Some((path, size)) = thumbnail::generate_thumbnail(&cache_dir, &source, id)? else {
+            return Ok(None);
+        };
+        // 短暂持锁：写缓存索引
+        {
+            let guard = conn.lock().map_err(|_| "内部状态锁定失败".to_string())?;
+            let conn = guard
+                .as_ref()
+                .ok_or_else(|| "数据库未初始化".to_string())?;
+            thumbnail::record_thumbnail(conn, id, &path, size)?;
+        }
+        Ok(Some(path))
     })
     .await
     .map_err(|e| format!("缩略图生成线程异常：{e}"))??;

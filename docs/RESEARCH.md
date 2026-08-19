@@ -13,6 +13,13 @@
 
 ## 条目
 
+### 2026-08-19 22:10:00 WebView2 不支持 HEIC + 缩略图解码持锁串行(实测)
+- 结论:① WebView2(Chromium)无法解码 HEIC,详情面板直接显示 HEIC 原图会失败,需改用缩略图(WebP);② 缩略图生成若在 DB 连接锁内解码(100-500ms/张),并发请求串行排队,大库首屏缩略图长时间不显示、详情查询排队卡死——解码必须移出锁,锁只覆盖毫秒级查询/写入;③ 扫描器跳过路径(mtime+size 未变)不恢复 missing→ok,换目录扫描后再扫原目录,列表(排除 missing)会一直为空
+- 理由:WebView2 解码能力取决于 Chromium 内置 codec(无 HEIC);rusqlite 默认 busy_timeout=5000ms,扫描事务持写锁期间缩略图写入会等待后失败
+- 验证: 2026-08-19 实测——大库 989 图仅 46 缩略图(串行生成);修复后 cargo test 20 过(含 missing 恢复回归测试),待 GUI 复测
+- 来源: 主会话
+- 关联: src-tauri/src/engine/thumbnail.rs、scanner.rs、src/components/DetailPanel.tsx
+
 ### 2026-08-19 21:10:00 Tauri 2 convertFileSrc 需启用 asset protocol(实测)
 - 结论:前端用 convertFileSrc(path) 显示本地文件(缩略图/原图)时,tauri.conf.json 必须配置 `security.assetProtocol.enable=true` 且 scope 覆盖目标路径(本地桌面应用可先 `["**"]`),同时 Cargo.toml 的 tauri 依赖需加 `protocol-asset` feature;缺任一则 img 加载失败(现象:网格有格子无图)。另:同步命令在主线程执行文件 I/O(EXIF 读取)会阻塞 UI(现象:点击详情卡死),应改 async + spawn_blocking
 - 理由:asset protocol 默认关闭,convertFileSrc 生成的 asset:// URL 无法加载;tauri-build 会校验 feature 与配置一致性(报错提示 add the protocol-asset feature)

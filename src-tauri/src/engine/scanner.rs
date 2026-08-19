@@ -215,12 +215,12 @@ pub fn is_image_path(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// 加载 images 表全部行：path → (file_size, mtime)。
+/// 加载 images 表全部行：path → (file_size, mtime, status)。
 fn load_existing(
     conn: &Connection,
-) -> Result<HashMap<String, (Option<i64>, Option<i64>)>, String> {
+) -> Result<HashMap<String, (Option<i64>, Option<i64>, String)>, String> {
     let mut stmt = conn
-        .prepare("SELECT path, file_size, mtime FROM images")
+        .prepare("SELECT path, file_size, mtime, status FROM images")
         .map_err(|e| format!("准备查询失败：{e}"))?;
     let rows = stmt
         .query_map([], |r| {
@@ -228,13 +228,14 @@ fn load_existing(
                 r.get::<_, String>(0)?,
                 r.get::<_, Option<i64>>(1)?,
                 r.get::<_, Option<i64>>(2)?,
+                r.get::<_, String>(3)?,
             ))
         })
         .map_err(|e| format!("查询索引失败：{e}"))?;
     let mut map = HashMap::new();
     for row in rows {
-        let (path, size, mtime) = row.map_err(|e| format!("读取索引行失败：{e}"))?;
-        map.insert(normalize_str(&path), (size, mtime));
+        let (path, size, mtime, status) = row.map_err(|e| format!("读取索引行失败：{e}"))?;
+        map.insert(normalize_str(&path), (size, mtime, status));
     }
     Ok(map)
 }
@@ -244,11 +245,17 @@ fn process_file(
     conn: &Connection,
     file: &DiskFile,
     norm: &str,
-    existing: &HashMap<String, (Option<i64>, Option<i64>)>,
+    existing: &HashMap<String, (Option<i64>, Option<i64>, String)>,
 ) -> Result<ProcessedFile, String> {
-    // 未变更（mtime+size 均一致）→ 跳过，不重读文件头。
-    if let Some((old_size, old_mtime)) = existing.get(norm) {
-        if *old_size == Some(file.size) && *old_mtime == Some(file.mtime) {
+    // 未变更且状态为 ok → 跳过，不重读文件头。
+    // 为什么要求 status==ok：文件可能因「扫描过其他目录」被标 missing，
+    // 重扫原目录时 mtime+size 未变但状态是 missing，必须走 UPDATE 恢复为 ok，
+    // 否则列表（排除 missing）会一直为空（实测 bug：重扫后图片列表不显示）。
+    if let Some((old_size, old_mtime, old_status)) = existing.get(norm) {
+        if old_status == STATUS_OK
+            && *old_size == Some(file.size)
+            && *old_mtime == Some(file.mtime)
+        {
             return Ok(ProcessedFile {
                 outcome: FileOutcome::Skipped,
                 probe_failed: false,
@@ -521,6 +528,47 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(status, STATUS_MISSING);
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// 文件被标 missing 后重扫原目录 → 恢复为 ok（回归：跳过路径不恢复状态）。
+    ///
+    /// 场景：先扫目录 A，再扫目录 B 时 A 的文件被标 missing；重扫 A 时
+    /// 文件未变（mtime+size 一致），若跳过路径不恢复状态，列表会一直为空。
+    #[test]
+    fn missing_file_restored_on_rescan() {
+        let dir = temp_dir("restore");
+        let root = dir.join("lib");
+        std::fs::create_dir_all(&root).unwrap();
+        let png = root.join("a.png");
+        make_png(&png, 4, 4);
+
+        let db_path = dir.join("test.db");
+        {
+            let mut conn = db::open(&db_path).unwrap();
+            run_scan(&mut conn, &root);
+
+            // 模拟「扫描过其他目录」：直接把状态置为 missing
+            conn.execute(
+                "UPDATE images SET status=?1",
+                rusqlite::params![STATUS_MISSING],
+            )
+            .unwrap();
+
+            // 重扫原目录：文件未变，应走 UPDATE 恢复为 ok（而非跳过）
+            let (stats, _) = run_scan(&mut conn, &root);
+            assert_eq!(stats.updated, 1);
+            assert_eq!(stats.skipped, 0);
+
+            let status: String = conn
+                .query_row(
+                    "SELECT status FROM images WHERE path LIKE '%a.png'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(status, STATUS_OK);
         }
         std::fs::remove_dir_all(&dir).unwrap();
     }

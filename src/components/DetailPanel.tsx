@@ -109,6 +109,7 @@ function groupExif(exif: Record<string, string>): Array<{ group: string; entries
 export default function DetailPanel({ id, onClose }: DetailPanelProps) {
   const [detail, setDetail] = useState<ImageDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [thumbSrc, setThumbSrc] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,6 +127,24 @@ export default function DetailPanel({ id, onClose }: DetailPanelProps) {
     };
   }, [id]);
 
+  // HEIC/HEIF 原图 WebView（Chromium）无法解码，详情大图改用缩略图（WebP）。
+  const isHeic = detail?.format === "heic" || detail?.format === "heif";
+  useEffect(() => {
+    let cancelled = false;
+    if (!isHeic) return;
+    setThumbSrc(null);
+    invoke<string | null>("get_thumbnail_path", { id })
+      .then((p) => {
+        if (!cancelled && p) setThumbSrc(convertFileSrc(p));
+      })
+      .catch(() => {
+        /* 缩略图生成失败按占位处理 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, isHeic]);
+
   const exifGroups = useMemo(() => (detail ? groupExif(detail.exif) : []), [detail]);
 
   return (
@@ -142,7 +161,15 @@ export default function DetailPanel({ id, onClose }: DetailPanelProps) {
         {detail && (
           <>
             <div className="detail-image">
-              <img src={convertFileSrc(detail.path)} alt={detail.path} />
+              {isHeic ? (
+                thumbSrc ? (
+                  <img src={thumbSrc} alt={detail.path} />
+                ) : (
+                  <div className="detail-image-placeholder" />
+                )
+              ) : (
+                <img src={convertFileSrc(detail.path)} alt={detail.path} />
+              )}
             </div>
             <dl className="detail-meta">
               <div className="meta-row">

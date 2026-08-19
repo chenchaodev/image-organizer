@@ -18,21 +18,23 @@ use std::path::{Path, PathBuf};
 /// 256px 在 2x 高分屏下显示 128dp 网格足够清晰，且体积/解码开销可控。
 pub const THUMB_SIZE: u32 = 256;
 
-/// 获取缩略图路径；无缓存时生成并落库。
+/// 查询源图路径与缓存命中（调用方持锁，短暂）。
 ///
-/// 返回 None 的三种情况：索引行不存在、status='missing'、解码失败（损坏文件）。
-/// 为什么解码失败返回 None 而非 Err：损坏文件是常态（下载中断/格式伪装），
-/// 前端应显示占位图而非报错；Err 只留给真正的系统故障（DB/IO 错误）。
-pub fn get_or_create_thumbnail(
+/// 返回 (source_path, cached_path)：source 为 None 表示索引行不存在或
+/// status='missing'；cached 为 Some 表示缓存命中（表记录 + 文件在盘）。
+///
+/// 为什么拆出查询：解码是 CPU 密集（HEIC 全尺寸 100-300ms），若在持锁
+/// 期间执行，多个并发请求会串行排队（实测大库缩略图长时间不显示）；
+/// 拆出后解码在 blocking 池并行，锁只覆盖毫秒级查询/写入。
+pub fn thumbnail_lookup(
     conn: &Connection,
-    cache_dir: &Path,
     image_id: i64,
-) -> Result<Option<PathBuf>, String> {
-    // ① 索引行不存在 → None
+) -> Result<(Option<String>, Option<PathBuf>), String> {
+    // ① 索引行不存在 → source None
     let Some(row) = images::query_image(conn, image_id)? else {
-        return Ok(None);
+        return Ok((None, None));
     };
-    // ② status='missing'（磁盘文件已删除）→ None
+    // ② status='missing'（磁盘文件已删除）→ source None
     // 为什么单独查 status：images::ImageRow 契约不含 status 字段（images.rs 不可改），
     // 状态语义由 scanner 常量承载（契约单一来源）。
     let status: String = conn
@@ -43,10 +45,10 @@ pub fn get_or_create_thumbnail(
         )
         .map_err(|e| format!("查询图片状态失败：{e}"))?;
     if status == scanner::STATUS_MISSING {
-        return Ok(None);
+        return Ok((None, None));
     }
 
-    // ③ 缓存命中：表记录存在且文件在磁盘 → 直接返回
+    // ③ 缓存命中：表记录存在且文件在磁盘 → cached Some
     // 为什么同时校验文件存在：表记录可能因缓存目录被清理/移动而失效，
     // 只查表不查盘会返回一个不存在的路径。
     let cached: Option<String> = conn
@@ -60,15 +62,24 @@ pub fn get_or_create_thumbnail(
     if let Some(p) = cached {
         let p = PathBuf::from(p);
         if p.is_file() {
-            return Ok(Some(p));
+            return Ok((Some(row.path), Some(p)));
         }
     }
+    Ok((Some(row.path), None))
+}
 
-    // ④ 未命中 → 生成
-    let img = match decode_image(Path::new(&row.path)) {
+/// 解码 + 缩略 + 保存（不持锁，可并行）。
+///
+/// 解码失败返回 Ok(None)（前端显示占位图，不写缓存库避免反复生成失败记录）；
+/// 保存失败返回 Err（真正的系统故障）。
+pub fn generate_thumbnail(
+    cache_dir: &Path,
+    source_path: &str,
+    image_id: i64,
+) -> Result<Option<(PathBuf, u32)>, String> {
+    let img = match decode_image(Path::new(source_path)) {
         Ok(img) => img,
         Err(e) => {
-            // 解码失败（损坏/格式不符）→ None，不写缓存库（避免反复生成失败记录）。
             eprintln!("[warn] 缩略图解码失败（id={image_id}）: {e}");
             return Ok(None);
         }
@@ -76,22 +87,27 @@ pub fn get_or_create_thumbnail(
     let thumb = img.thumbnail(THUMB_SIZE, THUMB_SIZE);
     let cache_path = cache_dir.join(format!("{image_id}.webp"));
     save_webp(&thumb, &cache_path)?;
-
-    // ⑤ 写缓存索引。为什么 INSERT OR IGNORE：并发请求同一 id 时，
-    // 后到者插入被主键冲突忽略，不覆盖先到者的记录（幂等）。
     // size 存实际最长边：小图缩略后可能小于 THUMB_SIZE，存实际值供分级缓存判断。
+    Ok(Some((cache_path, thumb.width().max(thumb.height()))))
+}
+
+/// 写缓存索引（调用方持锁，短暂）。
+///
+/// 为什么 INSERT OR IGNORE：并发请求同一 id 时，后到者插入被主键冲突
+/// 忽略，不覆盖先到者的记录（幂等）。
+pub fn record_thumbnail(
+    conn: &Connection,
+    image_id: i64,
+    cache_path: &Path,
+    size: u32,
+) -> Result<(), String> {
     conn.execute(
         "INSERT OR IGNORE INTO thumbnails (image_id, size, path, generated_at)
          VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params![
-            image_id,
-            thumb.width().max(thumb.height()) as i64,
-            cache_path.to_string_lossy(),
-            now_iso(),
-        ],
+        rusqlite::params![image_id, size as i64, cache_path.to_string_lossy(), now_iso()],
     )
     .map_err(|e| format!("写入缩略图索引失败：{e}"))?;
-    Ok(Some(cache_path))
+    Ok(())
 }
 
 /// 解码图片为 DynamicImage；heic/heif 走 libheif，其余走 image crate。
@@ -249,6 +265,20 @@ mod tests {
         conn.last_insert_rowid()
     }
 
+    /// 模拟命令层完整流程：查询 → 生成 → 记录（与 lib.rs 的 get_thumbnail_path 同构）。
+    fn get_thumb(conn: &Connection, cache: &Path, id: i64) -> Result<Option<PathBuf>, String> {
+        let (source, cached) = thumbnail_lookup(conn, id)?;
+        if let Some(p) = cached {
+            return Ok(Some(p));
+        }
+        let Some(source) = source else { return Ok(None); };
+        let Some((path, size)) = generate_thumbnail(cache, &source, id)? else {
+            return Ok(None);
+        };
+        record_thumbnail(conn, id, &path, size)?;
+        Ok(Some(path))
+    }
+
     /// PNG 首次生成 + 二次调用缓存命中（文件存在、不重新生成）。
     #[test]
     fn png_generate_then_cache_hit() {
@@ -265,14 +295,14 @@ mod tests {
             let id = insert(&conn, src.to_str().unwrap(), scanner::STATUS_OK);
 
             // 首次生成：文件存在、命名 {id}.webp、长边 ≤ THUMB_SIZE 且保持宽高比
-            let first = get_or_create_thumbnail(&conn, &cache, id).unwrap().unwrap();
+            let first = get_thumb(&conn, &cache, id).unwrap().unwrap();
             assert!(first.is_file());
             assert_eq!(first.file_name().unwrap(), format!("{id}.webp").as_str());
             let img = image::open(&first).unwrap();
             assert_eq!((img.width(), img.height()), (256, 192));
 
             // 二次调用：缓存命中（返回同一路径，表记录数不变，不重新生成）
-            let second = get_or_create_thumbnail(&conn, &cache, id).unwrap().unwrap();
+            let second = get_thumb(&conn, &cache, id).unwrap().unwrap();
             assert_eq!(second, first);
             let n: i64 = conn
                 .query_row("SELECT COUNT(*) FROM thumbnails", [], |r| r.get(0))
@@ -291,7 +321,7 @@ mod tests {
         {
             let conn = db::open(&dir.join("test.db")).unwrap();
             assert!(
-                get_or_create_thumbnail(&conn, &dir.join("cache"), 999)
+                get_thumb(&conn, &dir.join("cache"), 999)
                     .unwrap()
                     .is_none()
             );
@@ -311,7 +341,7 @@ mod tests {
             let conn = db::open(&dir.join("test.db")).unwrap();
             let id = insert(&conn, src.to_str().unwrap(), scanner::STATUS_MISSING);
             assert!(
-                get_or_create_thumbnail(&conn, &dir.join("cache"), id)
+                get_thumb(&conn, &dir.join("cache"), id)
                     .unwrap()
                     .is_none()
             );
@@ -329,7 +359,7 @@ mod tests {
             let conn = db::open(&dir.join("test.db")).unwrap();
             let id = insert(&conn, src.to_str().unwrap(), scanner::STATUS_OK);
             assert!(
-                get_or_create_thumbnail(&conn, &dir.join("cache"), id)
+                get_thumb(&conn, &dir.join("cache"), id)
                     .unwrap()
                     .is_none()
             );
@@ -364,7 +394,7 @@ mod tests {
         {
             let conn = db::open(&dir.join("test.db")).unwrap();
             let id = insert(&conn, fixture.to_str().unwrap(), scanner::STATUS_OK);
-            let thumb = get_or_create_thumbnail(&conn, &cache, id).unwrap().unwrap();
+            let thumb = get_thumb(&conn, &cache, id).unwrap().unwrap();
             assert!(thumb.is_file());
             let t = image::open(&thumb).unwrap();
             assert!(t.width() <= THUMB_SIZE && t.height() <= THUMB_SIZE);
