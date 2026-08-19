@@ -29,4 +29,8 @@ walkdir = "2.5.0"
 # 而本产品扩展名白名单只覆盖 png/jpeg/gif/webp/bmp/tiff，按需开启即可（CODE-GUIDE：新依赖先评估）。
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff"] }
 kamadak-exif = "0.6.1"
+# 为什么加 libheif-rs：heic/heif 是白名单扩展名（scanner::IMAGE_EXTENSIONS），
+# 但 image crate 不含 HEIC 解码器；libheif-rs 通过 vcpkg 链接系统 libheif，
+# Windows 下需 VCPKG_ROOT 环境变量指向 vcpkg 安装目录。
+libheif-rs = "2.7.0"
 

@@ -20,7 +20,13 @@ pub struct ImageProbe {
 /// 为什么用 image_dimensions 而非整图解码：它只读文件头（尺寸/格式
 /// 信息都在头部），对超大图也只需毫秒级 I/O，扫描大量文件时开销可控。
 /// 失败返回可读错误，由调用方决定降级策略（扫描器降级为尺寸留空入库）。
+///
+/// HEIC/HEIF 分支：image crate 不含 HEIC 解码器，改走 libheif 读主图
+/// handle 的宽高（同样只解析文件头，不整图解码，开销与 image_dimensions 同级）。
 pub fn probe_image(path: &Path) -> Result<ImageProbe, String> {
+    if is_heic_path(path) {
+        return probe_heic(path);
+    }
     let (width, height) = image::image_dimensions(path)
         .map_err(|e| format!("读取图片尺寸失败：{e}"))?;
     let format = image::ImageFormat::from_path(path)
@@ -29,6 +35,36 @@ pub fn probe_image(path: &Path) -> Result<ImageProbe, String> {
         width,
         height,
         format: format!("{format:?}").to_lowercase(),
+    })
+}
+
+/// 判断路径是否为 HEIC/HEIF 文件（扩展名大小写不敏感）。
+///
+/// 为什么放本模块：格式识别是元数据探测的职责，thumbnail.rs 解码时
+/// 复用同一判断，避免两处各自实现漂移（契约单一来源）。
+pub(crate) fn is_heic_path(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|e| e.to_str()),
+        Some(ext) if ext.eq_ignore_ascii_case("heic") || ext.eq_ignore_ascii_case("heif")
+    )
+}
+
+/// 用 libheif 探测 HEIC 尺寸与格式（只读文件头，不整图解码）。
+fn probe_heic(path: &Path) -> Result<ImageProbe, String> {
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| format!("路径不是有效 UTF-8：{}", path.display()))?;
+    let ctx = libheif_rs::HeifContext::read_from_file(path_str)
+        .map_err(|e| format!("读取 HEIC 文件失败：{e}"))?;
+    let handle = ctx
+        .primary_image_handle()
+        .map_err(|e| format!("获取 HEIC 主图句柄失败：{e}"))?;
+    Ok(ImageProbe {
+        width: handle.width(),
+        height: handle.height(),
+        // 统一记 "heic"：heif 与 heic 是同一容器格式（HEIF），
+        // 前端按格式展示时无需区分扩展名差异。
+        format: "heic".to_string(),
     })
 }
 
@@ -192,5 +228,20 @@ mod tests {
         assert!(read_exif(&dir.join("nope.png")).is_empty());
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// HEIC 探测尺寸/格式（样例在 test/fixtures/sample.heic，缺失时跳过）。
+    #[test]
+    fn probe_heic_dimensions() {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("test/fixtures/sample.heic");
+        if !fixture.is_file() {
+            eprintln!("[skip] 缺少 HEIC 样例文件 {fixture:?}，跳过 HEIC 探测测试");
+            return;
+        }
+        let probe = probe_image(&fixture).unwrap();
+        assert!(probe.width > 0 && probe.height > 0);
+        assert_eq!(probe.format, "heic");
     }
 }

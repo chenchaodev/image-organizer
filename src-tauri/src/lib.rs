@@ -6,12 +6,12 @@
 
 mod engine;
 
-use engine::{db, images, library, scanner};
+use engine::{db, images, library, scanner, thumbnail};
 use rusqlite::Connection;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 
 /// 全局状态：SQLite 连接 + 数据库路径 + 扫描运行标记。
@@ -20,10 +20,14 @@ use tauri::{Emitter, Manager};
 /// 失败时降级启动（命令返回可读错误），不让应用因初始化失败整体崩溃
 /// （CODE-GUIDE 失败降级：能力失败 → 降级 + 警告留痕）。
 ///
+/// 为什么 conn 再包一层 Arc：get_thumbnail_path 等异步命令需要把连接
+/// 移入 spawn_blocking 闭包（'static 要求），Arc 克隆后闭包内重新 lock；
+/// 同步命令经自动解引用照常使用，无需改动。
+///
 /// 为什么额外存 db_path：扫描线程需要独立连接（见 scan_library 注释），
 /// 而 rusqlite 连接无法反查自身文件路径，故在 setup 时一并保存。
 struct DbState {
-    conn: Mutex<Option<Connection>>,
+    conn: Arc<Mutex<Option<Connection>>>,
     db_path: Option<PathBuf>,
     /// 扫描运行标记：防止用户重复触发并发扫描（写库互踩）。
     scanning: AtomicBool,
@@ -260,6 +264,40 @@ fn get_image_detail(
     })
 }
 
+/// 获取缩略图路径；无缓存时生成并落库，无索引/解码失败返回 None。
+///
+/// 为什么 spawn_blocking：HEIC 全尺寸解码 100-300ms，若在 async 命令里
+/// 直接执行会阻塞 Tauri 异步运行时的事件循环（ADR-03）。
+/// 为什么 cache_dir 在命令层解析：引擎层不感知 Tauri 路径 API（硬约束），
+/// 应用数据目录经 app.path() 获取后拼 thumbnails 子目录。
+#[tauri::command]
+async fn get_thumbnail_path(
+    state: tauri::State<'_, DbState>,
+    app: tauri::AppHandle,
+    id: i64,
+) -> Result<Option<String>, String> {
+    let cache_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败：{e}"))?
+        .join("thumbnails");
+    std::fs::create_dir_all(&cache_dir)
+        .map_err(|e| format!("创建缩略图目录失败：{e}"))?;
+    // 为什么克隆 Arc 而非直接引用 state：spawn_blocking 要求闭包 'static，
+    // 不能借用命令作用域内的 state；连接在闭包内重新 lock 获取。
+    let conn = state.conn.clone();
+    let path = tauri::async_runtime::spawn_blocking(move || {
+        let guard = conn.lock().map_err(|_| "内部状态锁定失败".to_string())?;
+        let conn = guard
+            .as_ref()
+            .ok_or_else(|| "数据库未初始化".to_string())?;
+        thumbnail::get_or_create_thumbnail(conn, &cache_dir, id)
+    })
+    .await
+    .map_err(|e| format!("缩略图生成线程异常：{e}"))??;
+    Ok(path.map(|p| p.to_string_lossy().into_owned()))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -274,7 +312,7 @@ pub fn run() {
             match db::open(&db_path) {
                 Ok(conn) => {
                     app.manage(DbState {
-                        conn: Mutex::new(Some(conn)),
+                        conn: Arc::new(Mutex::new(Some(conn))),
                         db_path: Some(db_path),
                         scanning: AtomicBool::new(false),
                     });
@@ -283,7 +321,7 @@ pub fn run() {
                     // 降级启动：连接不可用但界面仍可打开，命令层返回可读错误。
                     eprintln!("[warn] 数据库初始化失败（{db_path:?}）: {e}");
                     app.manage(DbState {
-                        conn: Mutex::new(None),
+                        conn: Arc::new(Mutex::new(None)),
                         db_path: Some(db_path),
                         scanning: AtomicBool::new(false),
                     });
@@ -298,7 +336,8 @@ pub fn run() {
             get_library,
             scan_library,
             get_images,
-            get_image_detail
+            get_image_detail,
+            get_thumbnail_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

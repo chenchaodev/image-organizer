@@ -10,3 +10,4 @@ pub mod images;
 pub mod library;
 pub mod metadata;
 pub mod scanner;
+pub mod thumbnail;
