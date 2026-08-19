@@ -13,6 +13,13 @@
 
 ## 条目
 
+### 2026-08-19 23:10:00 快速滚动致缩略图请求堆积饿死可见格(实测)
+- 结论:虚拟滚动快速滚过大量单元格时,每个短暂挂载的单元格都会发 get_thumbnail_path 请求,堆积在 Rust 解码队列(4 并发)后,当前可见格的请求排到队尾被饿死——大库尾部缩略图长时间不显示,会话结束前未生成(实测 397 张 ok 图仅 116 张有缩略图,尾部 283 张全无,文件均为有效 JPEG 排除解码失败)。修复:前端缩略图请求延迟 200ms(单元格稳定可见才请求),过滤快速滚过的单元格,队列不再堆积
+- 理由:虚拟滚动挂载/卸载与请求解耦,立即请求会把「路过」的单元格请求也排进队
+- 验证: 2026-08-19 实测——修复前尾部 283 张无缩略图;修复后 npm run build 通过,待 GUI 复测
+- 来源: 主会话
+- 关联: src/components/ThumbnailCell.tsx
+
 ### 2026-08-19 22:40:00 dev 构建解码慢 40 倍 + 缩略图并发需限流(实测)
 - 结论:① `npm run tauri dev` 是 debug 构建,image/libheif 解码慢 ~40 倍(image-rs issue #1424),12MP JPEG 解码 10s+,缩略图/详情体验不可用——`[profile.dev.package."*"] opt-level = 2` 只优化依赖(解码热点在依赖内),自身代码保持 debug 快速迭代;② 缩略图解码无界并发会内存暴涨(12MP ≈48MB RGBA/张,40 并发 ≈2GB)且打满 CPU 饿死详情等 blocking 任务——需限流(4 并发 ≈200MB);③ Rust 1.97.1 无 std::sync::Semaphore(E0433),用 Mutex+Condvar 自实现 ~30 行;④ libheif-sys 的 vcpkg crate 默认找 x64-windows-static-md triplet,本机装的是 x64-windows——VCPKGRS_TRIPLET/VCPKGRS_DYNAMIC 固化到 `src-tauri/.cargo/config.toml` [env],依赖重编不再失败
 - 理由:debug 未优化时解码热点在依赖内,opt-level 只开依赖即可;限流同时保护内存与调度公平
