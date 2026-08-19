@@ -29,16 +29,18 @@
 - `docs/`:项目知识库(见 README.md 登记表)
 
 ## 测试体系(按内容主题零注册,新增=新建主题文件)
-- 目录分层:`test/<层>/`(unit/ 单元层 + integration/ 集成层),按内容主题命名,零注册自动发现
-- 静态样例入 `test/fixtures/`(可版本化);产物按用途分目录(如 output/artifacts + output/smoke),可清理重建、自清理
+- 目录分层:`test/<层>/`(segments/ 前端逻辑段 + fixtures/ 静态样例),按内容主题命名,零注册自动发现(vitest 自动扫描)
+- 前端测试:`npm test`(vitest run,node 环境,配置见 vitest.config.ts);静态样例入 `test/fixtures/`(可版本化,含 HEIC 样例)
+- 产物按用途分目录(如 output/artifacts + output/smoke),可清理重建、自清理
 - 断言写可验证事实(解包/产物字符串/读回),不写无断言日志
 - 验收样例生成器(可选):fixtures 由测试段导出 + 漂移校验(幂等,exit 0/1),GUI 人工实测直接拖入
 - 新增能力须补对应测试段;缺口清单见 ROADMAP
 
 ## 验证基线(STATUS.md 只留指针)
-- 已跑通:`npm run build`(tsc + vite,脚手架默认页)、`npm install`(npmmirror)、`cargo check`(Rust 1.97.1 + MSVC 14.44 + WinSDK 10.0.26100,自动探测 MSVC 实例,1m33s)
+- 已跑通:`npm run build`(tsc + vite)、`npm test`(vitest 13 用例)、`cargo check`、`cargo test`(19 用例,含 HEIC 解码/缩略图)、`npm install`(npmmirror)
+- Rust 构建 HEIC 依赖 vcpkg:命令前需 `$env:VCPKG_ROOT="C:\dev\vcpkg"; $env:Path="C:\dev\vcpkg;$env:Path"`(当前 shell 不继承用户级环境变量);运行测试前把 heif.dll/libde265.dll 拷入 target\debug\(开发模式已就位)
 - 历史:初始化期 installer 未写完注册表时曾用显式 linker + 手动 LIB 绕行,2026-08-18 注册表就绪后已移除(记录于 git 历史)
-- 验收方式:ACCEPTANCE.md 待实测清单(GUI 人工项);自动断言测试段(后续迭代建立)
-- 打包/发布:打包命令 `npm run tauri build`;已知限制:Windows 需 MSVC(自动探测已就绪)
+- 验收方式:ACCEPTANCE.md 待实测清单(GUI 人工项);自动断言测试段(test/segments/ + cargo test)
+- 打包/发布:打包命令 `npm run tauri build`;已知限制:Windows 需 MSVC(自动探测已就绪);HEIC 运行期 DLL 打包分发待处理(ROADMAP 已知限制)
 - 构建/打包/工具链类改动必须实际构建并重跑本基线
 - 人工验收要点:docs/ACCEPTANCE.md 待实测清单
