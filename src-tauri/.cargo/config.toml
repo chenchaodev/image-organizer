@@ -1,0 +1,9 @@
+# 项目级 cargo 配置：固化 libheif-sys 的 vcpkg 构建环境。
+#
+# 为什么放这里而非依赖 shell 环境变量：libheif-sys 的 vcpkg crate 默认找
+# x64-windows-static-md triplet，而本机 vcpkg 装的是 x64-windows（动态库）；
+# 不设 VCPKGRS_TRIPLET 会在依赖重编时失败（实测 profile 改动触发重编即报错）。
+# 放 [env] 让构建脚本始终拿到正确值，不依赖开发者 shell 状态。
+[env]
+VCPKGRS_TRIPLET = "x64-windows"
+VCPKGRS_DYNAMIC = "1"

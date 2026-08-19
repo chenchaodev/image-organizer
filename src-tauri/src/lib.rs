@@ -11,8 +11,58 @@ use rusqlite::Connection;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use tauri::{Emitter, Manager};
+
+/// 缩略图解码并发上限。
+///
+/// 为什么限流：全尺寸解码 12MP 图约 48MB RGBA/张，无界并发会内存暴涨
+/// （40 张并发 ≈2GB）且打满 CPU 饿死其他 blocking 任务（实测详情查询
+/// 排队卡加载）；4 并发 ≈200MB 峰值，且给详情/EXIF 查询留出调度空间。
+const THUMB_DECODE_CONCURRENCY: usize = 4;
+
+/// 缩略图解码并发限流器（std 实现，Mutex + Condvar）。
+///
+/// 为什么不用 std::sync::Semaphore：Rust 1.97.1 尚未稳定该类型（实测
+/// E0433 cannot find Semaphore in sync），自实现 ~30 行避免引入 tokio 依赖。
+struct ThumbLimiter {
+    count: Mutex<usize>,
+    cv: Condvar,
+}
+
+impl ThumbLimiter {
+    const fn new(max: usize) -> Self {
+        Self {
+            count: Mutex::new(max),
+            cv: Condvar::new(),
+        }
+    }
+
+    /// 阻塞获取一个许可；返回的 guard 在 drop 时释放。
+    fn acquire(&self) -> ThumbPermit<'_> {
+        let mut n = self.count.lock().unwrap_or_else(|e| e.into_inner());
+        while *n == 0 {
+            n = self.cv.wait(n).unwrap_or_else(|e| e.into_inner());
+        }
+        *n -= 1;
+        ThumbPermit { limiter: self }
+    }
+}
+
+/// 许可 guard：drop 时归还计数并唤醒一个等待者。
+struct ThumbPermit<'a> {
+    limiter: &'a ThumbLimiter,
+}
+
+impl Drop for ThumbPermit<'_> {
+    fn drop(&mut self) {
+        let mut n = self.limiter.count.lock().unwrap_or_else(|e| e.into_inner());
+        *n += 1;
+        self.limiter.cv.notify_one();
+    }
+}
+
+static THUMB_LIMITER: ThumbLimiter = ThumbLimiter::new(THUMB_DECODE_CONCURRENCY);
 
 /// 全局状态：SQLite 连接 + 数据库路径 + 扫描运行标记。
 ///
@@ -313,6 +363,9 @@ async fn get_thumbnail_path(
         let Some(source) = source else {
             return Ok(None);
         };
+        // 限流：最多 THUMB_DECODE_CONCURRENCY 个并发解码（内存/CPU 保护，
+        // 避免饿死详情等 blocking 任务）。许可持有到闭包结束（含短暂写库）。
+        let _permit = THUMB_LIMITER.acquire();
         // 不持锁：解码生成（blocking 池并行）
         let Some((path, size)) = thumbnail::generate_thumbnail(&cache_dir, &source, id)? else {
             return Ok(None);

@@ -13,6 +13,13 @@
 
 ## 条目
 
+### 2026-08-19 22:40:00 dev 构建解码慢 40 倍 + 缩略图并发需限流(实测)
+- 结论:① `npm run tauri dev` 是 debug 构建,image/libheif 解码慢 ~40 倍(image-rs issue #1424),12MP JPEG 解码 10s+,缩略图/详情体验不可用——`[profile.dev.package."*"] opt-level = 2` 只优化依赖(解码热点在依赖内),自身代码保持 debug 快速迭代;② 缩略图解码无界并发会内存暴涨(12MP ≈48MB RGBA/张,40 并发 ≈2GB)且打满 CPU 饿死详情等 blocking 任务——需限流(4 并发 ≈200MB);③ Rust 1.97.1 无 std::sync::Semaphore(E0433),用 Mutex+Condvar 自实现 ~30 行;④ libheif-sys 的 vcpkg crate 默认找 x64-windows-static-md triplet,本机装的是 x64-windows——VCPKGRS_TRIPLET/VCPKGRS_DYNAMIC 固化到 `src-tauri/.cargo/config.toml` [env],依赖重编不再失败
+- 理由:debug 未优化时解码热点在依赖内,opt-level 只开依赖即可;限流同时保护内存与调度公平
+- 验证: 2026-08-19 实测——未开优化时大库缩略图 10s+/张、详情排队卡加载;修复后 cargo test 20 过,待 GUI 复测
+- 来源: 主会话
+- 关联: src-tauri/Cargo.toml、src-tauri/.cargo/config.toml、src-tauri/src/lib.rs
+
 ### 2026-08-19 22:10:00 WebView2 不支持 HEIC + 缩略图解码持锁串行(实测)
 - 结论:① WebView2(Chromium)无法解码 HEIC,详情面板直接显示 HEIC 原图会失败,需改用缩略图(WebP);② 缩略图生成若在 DB 连接锁内解码(100-500ms/张),并发请求串行排队,大库首屏缩略图长时间不显示、详情查询排队卡死——解码必须移出锁,锁只覆盖毫秒级查询/写入;③ 扫描器跳过路径(mtime+size 未变)不恢复 missing→ok,换目录扫描后再扫原目录,列表(排除 missing)会一直为空
 - 理由:WebView2 解码能力取决于 Chromium 内置 codec(无 HEIC);rusqlite 默认 busy_timeout=5000ms,扫描事务持写锁期间缩略图写入会等待后失败

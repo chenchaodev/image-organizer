@@ -37,8 +37,9 @@
 - 新增能力须补对应测试段;缺口清单见 ROADMAP
 
 ## 验证基线(STATUS.md 只留指针)
-- 已跑通:`npm run build`(tsc + vite)、`npm test`(vitest 13 用例)、`cargo check`、`cargo test`(19 用例,含 HEIC 解码/缩略图)、`npm install`(npmmirror)
-- Rust 构建 HEIC 依赖 vcpkg:命令前需 `$env:VCPKG_ROOT="C:\dev\vcpkg"; $env:Path="C:\dev\vcpkg;$env:Path"`(当前 shell 不继承用户级环境变量);运行测试前把 heif.dll/libde265.dll 拷入 target\debug\(开发模式已就位)
+- 已跑通:`npm run build`(tsc + vite)、`npm test`(vitest 13 用例)、`cargo check`、`cargo test`(20 用例,含 HEIC 解码/缩略图/missing 恢复)、`npm install`(npmmirror)
+- Rust 构建 HEIC 依赖 vcpkg:triplet 与动态链接已固化在 `src-tauri/.cargo/config.toml`(VCPKGRS_TRIPLET=x64-windows + VCPKGRS_DYNAMIC=1),无需 shell 变量;命令前仍需 `$env:VCPKG_ROOT="C:\dev\vcpkg"; $env:Path="C:\dev\vcpkg;$env:Path"`(当前 shell 不继承用户级环境变量);运行测试前把 heif.dll/libde265.dll 拷入 target\debug\(开发模式已就位)
+- dev 构建已开依赖优化(`[profile.dev.package."*"] opt-level = 2`):image/libheif 解码在 debug 下慢 ~40 倍,不开优化 dev 模式缩略图不可用
 - 历史:初始化期 installer 未写完注册表时曾用显式 linker + 手动 LIB 绕行,2026-08-18 注册表就绪后已移除(记录于 git 历史)
 - 验收方式:ACCEPTANCE.md 待实测清单(GUI 人工项);自动断言测试段(test/segments/ + cargo test)
 - 打包/发布:打包命令 `npm run tauri build`;已知限制:Windows 需 MSVC(自动探测已就绪);HEIC 运行期 DLL 打包分发待处理(ROADMAP 已知限制)

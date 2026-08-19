@@ -17,6 +17,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+# 为什么 dev 依赖也开优化：image/libheif 解码在 debug 下慢 ~40 倍（image-rs issue #1424），
+# `npm run tauri dev` 实测 12MP JPEG 解码 10s+，缩略图/详情体验不可用；
+# 只优化依赖（解码热点在依赖内），自身代码保持 debug 快速迭代。
+[profile.dev.package."*"]
+opt-level = 2
+
 [dependencies]
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2"
