@@ -4,11 +4,12 @@
 
 ## 记录(倒序,最新在上 = 当前状态)
 
-- 2026-08-19:**发布 v0.1.8**(2a71ba7;apt 动态查找修复后验证发布,CI 构建中;对比 v0.1.7:macOS 5m46s/Windows 7m42s/Ubuntu 12s 快速失败)
+- 2026-08-19:**v0.1.8 收尾**——CI(2m33s)与 release(7m27s)均通过,apt 动态查找修复验证完成;同步 M0 完成状态,进入迭代 2「M1 扫描浏览」规划
+- 2026-08-19:发布 v0.1.8(2a71ba7;apt 动态查找修复后验证发布,CI 构建中;对比 v0.1.7:macOS 5m46s/Windows 7m42s/Ubuntu 12s 快速失败)
 
 ## 验证基线
 - 已跑通命令/验收方式/打包发布见 `DEV-GUIDE.md`「验证基线」节,此处只留指针
 
 ## 打开事项
-- [ ] 确认 GitHub Actions check job 通过(推送后自动触发,可在 GitHub Actions 页查看)
+- [x] 确认 GitHub Actions check job 通过(2026-08-19:CI success 2m33s + release success 7m27s)
 - [ ] M1 扫描浏览(迭代 2):增量扫描器 + 元数据/EXIF + 缩略图队列 + 网格浏览(规划见 ROADMAP)
