@@ -48,9 +48,9 @@ pub fn thumbnail_lookup(
         return Ok((None, None));
     }
 
-    // ③ 缓存命中：表记录存在且文件在磁盘 → cached Some
-    // 为什么同时校验文件存在：表记录可能因缓存目录被清理/移动而失效，
-    // 只查表不查盘会返回一个不存在的路径。
+    // ③ 缓存命中：表记录存在且文件有效（非空 + 可解析）→ cached Some
+    // 为什么校验内容而非只查存在：历史生成可能留下 0 字节/损坏文件
+    // （实测 597.webp 为 0 字节），只查存在会永远命中坏缓存（重扫不更新）。
     let cached: Option<String> = conn
         .query_row(
             "SELECT path FROM thumbnails WHERE image_id = ?1",
@@ -61,11 +61,25 @@ pub fn thumbnail_lookup(
         .map_err(|e| format!("查询缩略图缓存失败：{e}"))?;
     if let Some(p) = cached {
         let p = PathBuf::from(p);
-        if p.is_file() {
+        if is_valid_thumbnail(&p) {
             return Ok((Some(row.path), Some(p)));
         }
     }
     Ok((Some(row.path), None))
+}
+
+/// 校验缓存缩略图文件有效：非空且可解析为图片。
+///
+/// 为什么校验内容而非只查存在：历史生成可能留下 0 字节/损坏文件
+/// （实测 597.webp 为 0 字节），只查存在会永远命中坏缓存（重扫不更新）。
+fn is_valid_thumbnail(path: &Path) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    if meta.len() == 0 {
+        return false;
+    }
+    image::image_dimensions(path).is_ok()
 }
 
 /// 解码 + 缩略 + 保存（不持锁，可并行）。
@@ -124,19 +138,16 @@ pub fn backfill_missing(
     cache_dir: &Path,
     concurrency: usize,
 ) -> Result<u32, String> {
-    // 查询缺缩略图的非 missing 图片
+    // 查询所有非 missing 图片（含已有缩略图记录的——记录可能指向损坏文件，
+    // 如 0 字节缓存，需一并重新生成）。
     let mut stmt = conn
-        .prepare(
-            "SELECT i.id, i.path FROM images i
-             LEFT JOIN thumbnails t ON t.image_id = i.id
-             WHERE i.status != ?1 AND t.image_id IS NULL",
-        )
+        .prepare("SELECT id, path FROM images WHERE status != ?1")
         .map_err(|e| format!("准备查询失败：{e}"))?;
     let rows = stmt
         .query_map(rusqlite::params![scanner::STATUS_MISSING], |r| {
             Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
         })
-        .map_err(|e| format!("查询缺缩略图图片失败：{e}"))?;
+        .map_err(|e| format!("查询图片失败：{e}"))?;
     let jobs: Vec<(i64, String)> = rows
         .map(|r| r.map_err(|e| format!("读取图片行失败：{e}")))
         .collect::<Result<_, _>>()?;
@@ -155,6 +166,10 @@ pub fn backfill_missing(
             s.spawn(move || loop {
                 let job = queue.lock().unwrap().pop();
                 let Some((id, path)) = job else { break };
+                // 缓存文件有效（非空 + 可解析）→ 跳过；无效（0 字节/损坏）→ 重新生成
+                if is_valid_thumbnail(&cache_dir.join(format!("{id}.webp"))) {
+                    continue;
+                }
                 match generate_thumbnail(cache_dir, &path, id) {
                     Ok(Some((p, size))) => results.lock().unwrap().push((id, p, size)),
                     Ok(None) => { /* 解码失败跳过（前端占位） */ }
@@ -490,6 +505,38 @@ mod tests {
             // 两个都有缩略图了
             assert!(get_thumb(&conn, &cache, id1).unwrap().is_some());
             assert!(get_thumb(&conn, &cache, id2).unwrap().is_some());
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// 坏缓存（0 字节文件）→ 视为未命中重新生成（回归：只查存在会永远命中坏缓存）。
+    #[test]
+    fn corrupt_cache_regenerates() {
+        let dir = temp_dir("badcache");
+        let cache = dir.join("cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        let src = dir.join("a.png");
+        image::RgbaImage::from_pixel(64, 64, image::Rgba([1u8, 2, 3, 255]))
+            .save(&src)
+            .unwrap();
+        {
+            let conn = db::open(&dir.join("test.db")).unwrap();
+            let id = insert(&conn, src.to_str().unwrap(), scanner::STATUS_OK);
+            // 首次生成正常缩略图
+            let first = get_thumb(&conn, &cache, id).unwrap().unwrap();
+            assert!(first.is_file());
+            // 破坏缓存文件（0 字节）
+            std::fs::write(&first, b"").unwrap();
+            // 再次获取：应重新生成（非空有效文件），而非命中坏缓存
+            let second = get_thumb(&conn, &cache, id).unwrap().unwrap();
+            assert_eq!(second, first); // 路径相同（覆盖写）
+            let meta = std::fs::metadata(&second).unwrap();
+            assert!(meta.len() > 0); // 重新生成后非空
+            // 表记录仍指向同一路径（INSERT OR IGNORE 幂等）
+            let n: i64 = conn
+                .query_row("SELECT COUNT(*) FROM thumbnails", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(n, 1);
         }
         std::fs::remove_dir_all(&dir).unwrap();
     }
