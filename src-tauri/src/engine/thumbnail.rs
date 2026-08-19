@@ -110,6 +110,68 @@ pub fn record_thumbnail(
     Ok(())
 }
 
+/// 后台补齐缺失缩略图：为所有非 missing 且无缩略图的图片生成缩略图。
+///
+/// 为什么独立于按需生成：扫描只更新索引表不生成缩略图，历史扫描过的
+/// 图片可能一直缺缩略图（实测：重扫不更新）；扫描完成后调用本函数
+/// 一次性补齐，浏览时即缓存命中。
+///
+/// 为什么 std::thread::scope：解码是 CPU 密集且不持连接锁，用 scoped
+/// 线程并行解码（concurrency 个），结果收集后统一写库（连接只短暂持锁）。
+/// 返回成功生成数量。
+pub fn backfill_missing(
+    conn: &Connection,
+    cache_dir: &Path,
+    concurrency: usize,
+) -> Result<u32, String> {
+    // 查询缺缩略图的非 missing 图片
+    let mut stmt = conn
+        .prepare(
+            "SELECT i.id, i.path FROM images i
+             LEFT JOIN thumbnails t ON t.image_id = i.id
+             WHERE i.status != ?1 AND t.image_id IS NULL",
+        )
+        .map_err(|e| format!("准备查询失败：{e}"))?;
+    let rows = stmt
+        .query_map(rusqlite::params![scanner::STATUS_MISSING], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+        })
+        .map_err(|e| format!("查询缺缩略图图片失败：{e}"))?;
+    let jobs: Vec<(i64, String)> = rows
+        .map(|r| r.map_err(|e| format!("读取图片行失败：{e}")))
+        .collect::<Result<_, _>>()?;
+    let total = jobs.len();
+    if total == 0 {
+        return Ok(0);
+    }
+
+    // 并行解码（不持连接锁），结果收集后统一写库
+    let queue = std::sync::Mutex::new(jobs);
+    let results = std::sync::Mutex::new(Vec::with_capacity(total));
+    std::thread::scope(|s| {
+        for _ in 0..concurrency {
+            let queue = &queue;
+            let results = &results;
+            s.spawn(move || loop {
+                let job = queue.lock().unwrap().pop();
+                let Some((id, path)) = job else { break };
+                match generate_thumbnail(cache_dir, &path, id) {
+                    Ok(Some((p, size))) => results.lock().unwrap().push((id, p, size)),
+                    Ok(None) => { /* 解码失败跳过（前端占位） */ }
+                    Err(e) => eprintln!("[warn] 缩略图生成失败（id={id}）: {e}"),
+                }
+            });
+        }
+    });
+
+    // 统一写缓存索引（短暂持锁）
+    let results = results.lock().unwrap();
+    for (id, p, size) in results.iter() {
+        record_thumbnail(conn, *id, p, *size)?;
+    }
+    Ok(results.len() as u32)
+}
+
 /// 解码图片为 DynamicImage；heic/heif 走 libheif，其余走 image crate。
 fn decode_image(path: &Path) -> Result<DynamicImage, String> {
     if metadata::is_heic_path(path) {
@@ -398,6 +460,36 @@ mod tests {
             assert!(thumb.is_file());
             let t = image::open(&thumb).unwrap();
             assert!(t.width() <= THUMB_SIZE && t.height() <= THUMB_SIZE);
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// 补齐缺失缩略图：无缩略图的生成，已有缩略图的跳过。
+    #[test]
+    fn backfill_generates_missing_only() {
+        let dir = temp_dir("backfill");
+        let cache = dir.join("cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        let src1 = dir.join("a.png");
+        let src2 = dir.join("b.png");
+        image::RgbaImage::from_pixel(64, 64, image::Rgba([1u8, 2, 3, 255]))
+            .save(&src1)
+            .unwrap();
+        image::RgbaImage::from_pixel(32, 32, image::Rgba([4u8, 5, 6, 255]))
+            .save(&src2)
+            .unwrap();
+        {
+            let conn = db::open(&dir.join("test.db")).unwrap();
+            let id1 = insert(&conn, src1.to_str().unwrap(), scanner::STATUS_OK);
+            let id2 = insert(&conn, src2.to_str().unwrap(), scanner::STATUS_OK);
+            // 先给 id1 生成缩略图（模拟已有缓存）
+            get_thumb(&conn, &cache, id1).unwrap().unwrap();
+            // 补齐：只生成 id2
+            let n = backfill_missing(&conn, &cache, 2).unwrap();
+            assert_eq!(n, 1);
+            // 两个都有缩略图了
+            assert!(get_thumb(&conn, &cache, id1).unwrap().is_some());
+            assert!(get_thumb(&conn, &cache, id2).unwrap().is_some());
         }
         std::fs::remove_dir_all(&dir).unwrap();
     }

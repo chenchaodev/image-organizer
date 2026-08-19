@@ -251,6 +251,7 @@ fn scan_library(state: tauri::State<'_, DbState>, app: tauri::AppHandle) -> Resu
 }
 
 /// 在后台线程中执行扫描：打开独立连接 → 调用引擎扫描器 → 转发进度事件。
+/// 扫描成功后后台补齐缺失缩略图（不阻塞扫描完成事件）。
 fn run_scan(app: &tauri::AppHandle, db_path: &Path, library_path: &str) -> Result<(), String> {
     let mut conn = db::open(db_path).map_err(|e| format!("打开数据库失败：{e}"))?;
     let root = Path::new(library_path);
@@ -268,8 +269,35 @@ fn run_scan(app: &tauri::AppHandle, db_path: &Path, library_path: &str) -> Resul
                 message: p.message,
             },
         );
-    })
-    .map(|_| ())
+    })?;
+    // 扫描完成：释放扫描连接，后台补齐缺失缩略图（历史扫描过的图片
+    // 可能一直缺缩略图，重扫不更新——补齐后浏览即缓存命中）。
+    drop(conn);
+    let app = app.clone();
+    let db_path = db_path.to_path_buf();
+    std::thread::spawn(move || {
+        if let Err(e) = thumbnail_backfill(&app, &db_path) {
+            eprintln!("[warn] 缩略图补齐失败：{e}");
+        }
+    });
+    Ok(())
+}
+
+/// 后台补齐缺失缩略图：独立连接 + 并行解码，完成后写缓存索引。
+fn thumbnail_backfill(app: &tauri::AppHandle, db_path: &Path) -> Result<(), String> {
+    let cache_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败：{e}"))?
+        .join("thumbnails");
+    std::fs::create_dir_all(&cache_dir)
+        .map_err(|e| format!("创建缩略图目录失败：{e}"))?;
+    let conn = db::open(db_path).map_err(|e| format!("打开数据库失败：{e}"))?;
+    let n = thumbnail::backfill_missing(&conn, &cache_dir, THUMB_DECODE_CONCURRENCY)?;
+    if n > 0 {
+        eprintln!("[info] 缩略图补齐完成：{n} 张");
+    }
+    Ok(())
 }
 
 /// 分页查询图片列表（按 id 升序，排除 missing）。
