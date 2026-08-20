@@ -38,6 +38,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      # libheif-sys 依赖 vcpkg 预装 libheif(Windows 不能纯 cargo 构建,ADR-03);
+      # runner 自带 vcpkg(C:\vcpkg),installed 目录用 actions/cache 缓存避免每次重编
+      - uses: actions/cache@v4
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-libheif-2026-08
+      - name: Install libheif (vcpkg)
+        shell: pwsh
+        run: vcpkg install libheif:x64-windows
+      # 运行期 DLL 拷入 target\debug:cargo test 的 HEIC 用例运行时需要
+      - name: Copy HEIC DLLs
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force src-tauri\target\debug | Out-Null
+          Copy-Item C:\vcpkg\installed\x64-windows\bin\heif.dll,C:\vcpkg\installed\x64-windows\bin\libde265.dll src-tauri\target\debug\
       - name: Cargo check
         run: cargo check
         working-directory: src-tauri
@@ -94,6 +109,25 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      # libheif-sys 依赖 vcpkg 预装 libheif(Windows 不能纯 cargo 构建,ADR-03);
+      # runner 自带 vcpkg(C:\vcpkg),installed 目录用 actions/cache 缓存避免每次重编
+      - uses: actions/cache@v4
+        if: matrix.platform == 'windows-latest'
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-libheif-2026-08
+      - name: Install libheif (vcpkg)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: vcpkg install libheif:x64-windows
+      # 运行期 DLL 拷入 target\release:bundler 打包进安装包(heif.dll 被 exe 直接
+      # 导入会自动收集,libde265.dll 是 heif.dll 的依赖需显式 resources 打包)
+      - name: Copy HEIC DLLs
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force src-tauri\target\release | Out-Null
+          Copy-Item C:\vcpkg\installed\x64-windows\bin\heif.dll,C:\vcpkg\installed\x64-windows\bin\libde265.dll src-tauri\target\release\
       - name: Install frontend deps
         run: npm ci
       # 汇总上次 tag 到本次 tag 的提交(prefix 风格,与仓库一致);无上次 tag 时为首发
