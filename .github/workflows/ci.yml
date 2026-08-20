@@ -49,12 +49,15 @@ jobs:
       - name: Install libheif (vcpkg)
         shell: pwsh
         run: vcpkg install libheif:x64-windows
-      # 运行期 DLL 拷入 target\debug:cargo test 的 HEIC 用例运行时需要
+      # 运行期 DLL 拷入 target\debug(cargo test 运行时需要)+ target\release
+      # (tauri-build 校验 bundle.resources 需要,tauri.windows.conf.json 指向 release)
       - name: Copy HEIC DLLs
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force src-tauri\target\debug | Out-Null
+          New-Item -ItemType Directory -Force src-tauri\target\release | Out-Null
           Copy-Item C:\vcpkg\installed\x64-windows\bin\heif.dll,C:\vcpkg\installed\x64-windows\bin\libde265.dll src-tauri\target\debug\
+          Copy-Item C:\vcpkg\installed\x64-windows\bin\heif.dll,C:\vcpkg\installed\x64-windows\bin\libde265.dll src-tauri\target\release\
       - name: Cargo check
         run: cargo check
         working-directory: src-tauri
