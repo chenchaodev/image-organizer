@@ -106,7 +106,16 @@ jobs:
           sudo rm -f /etc/apt/apt-mirrors.txt
           sudo grep -rl 'mirror+file:/etc/apt/apt-mirrors.txt' /etc/apt/ 2>/dev/null | while read -r f; do sudo sed -i 's|mirror+file:/etc/apt/apt-mirrors.txt|http://archive.ubuntu.com/ubuntu|g' "$f"; done
           sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libheif-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libde265-dev libx265-dev libaom-dev libjpeg-dev libpng-dev cmake ninja-build
+      # ubuntu-22.04 的 libheif 1.12 不满足 libheif-sys 的 >= 1.21 要求(24.04 也仅 1.17),
+      # 源码编译 1.23.1 装到 /usr/local(pkg-config 默认路径优先于 apt 版本)
+      - name: Build libheif from source (Ubuntu)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          git clone --depth 1 --branch v1.23.1 https://github.com/strukturag/libheif.git /tmp/libheif
+          cmake -S /tmp/libheif -B /tmp/libheif/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DWITH_DAV1D=OFF -DWITH_RAV1E=OFF -DWITH_SvtEnc=OFF -DWITH_KVAZAAR=OFF
+          cmake --build /tmp/libheif/build
+          sudo cmake --install /tmp/libheif/build
       # libheif-sys 依赖系统 libheif(macOS 用 Homebrew,ADR-03)
       - name: Install libheif (Homebrew)
         if: matrix.platform == 'macos-latest'
