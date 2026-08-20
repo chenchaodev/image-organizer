@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "resources": {
+      "target/release/heif.dll": "heif.dll",
+      "target/release/libde265.dll": "libde265.dll"
+    }
+  }
+}
