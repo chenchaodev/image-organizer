@@ -102,7 +102,11 @@ jobs:
           sudo rm -f /etc/apt/apt-mirrors.txt
           sudo grep -rl 'mirror+file:/etc/apt/apt-mirrors.txt' /etc/apt/ 2>/dev/null | while read -r f; do sudo sed -i 's|mirror+file:/etc/apt/apt-mirrors.txt|http://archive.ubuntu.com/ubuntu|g' "$f"; done
           sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libheif-dev
+      # libheif-sys 依赖系统 libheif(macOS 用 Homebrew,ADR-03)
+      - name: Install libheif (Homebrew)
+        if: matrix.platform == 'macos-latest'
+        run: brew install libheif
       - uses: dtolnay/rust-toolchain@stable
       # sccache:跨运行共享编译单元缓存,Windows 慢平台收益最大
       - uses: mozilla/sccache-action@v0.0.11
